@@ -1,0 +1,102 @@
+#include <PID_v1.h>
+
+//pid
+#define SignalToActuador 9//pin a controlar en el  motor(verde led)
+#define Imput A0//pin de lectura del NTC
+float DataImput = 0;
+float R1 = 10000;
+float R2, SHR2, Temperature;
+int Control = 0;
+//constantes de la ecuacion de Steinhart-hart
+float A = 2.108508173e-3, B = 0.7979204727e-4, C = 6.535076315e-7;
+double Referencia, Entrada, Salida;//variables de pid
+double Kp = 2.225, Ki = 0.000001, Kd = 0.00001;
+PID myPID(&Entrada, &Salida, &Referencia, Kp, Ki, Kd, DIRECT);
+
+//triac
+#define CruceAC  1//pin del optoacoplador 
+#define Triac 6//pin para controlar el triac o SSR(led rojo)
+int Valor = 0;
+boolean Estado = LOW;
+int EstadoCruce = 0;
+int EstadoAsc = 0;
+int Range = 0;
+int Convert = 0;
+
+void setup()
+{
+    Serial.begin(115200);
+
+    pinMode(Imput, INPUT);
+    pinMode(SignalToActuador, OUTPUT);
+    pinMode(CruceAC, INPUT);
+    pinMode(Triac, OUTPUT);
+    Referencia = 38.5; //setpoint o valor de 'referencia
+    myPID.SetMode(AUTOMATIC); //modo del PID
+
+}
+
+// Add the main program code into the continuous loop() function
+void loop()
+{
+    DataImput = analogRead(Imput);
+    //primero se obtiene la temperatura
+    R2 = R1 * (1023 / DataImput - 1);//convertimos la lectura analogica del POT a resistencia 
+    SHR2 = log(R2);
+    Temperature = (1 / (A + B * SHR2 + C * SHR2 * SHR2 * SHR2));
+    Temperature -= 273.15;
+    //se le asigna a la funcion Input del PID
+    Entrada = Temperature;
+    myPID.Compute();
+
+    Control = map(Salida, 0, 37.95, 0, 255);//control tomara 255 cuando la temperatura este baja 
+    Range = Control;
+    Convert = map(Control, 0, 255, 255, 0);//al alumentar la temperatura el motor se para
+    //se declara conver xq a menor temperatura , mayor luz y menis ventilacion.
+    if (Convert < 0)//para evitar valores negativos
+    {
+        Convert = 0;
+    }
+    analogWrite(SignalToActuador, Convert);//salida mapeada para el control del motor,ventilacion 
+    
+     EstadoCruce = digitalRead(CruceAC);
+        if (EstadoCruce != EstadoAsc) {
+            if (EstadoCruce == LOW) {
+                Estado = true;
+            }
+        }
+     EstadoAsc = EstadoCruce;
+
+        //8300 lo apaga y 0 lo activa a razon de 100%   
+
+        Valor = map(Range, 0, 255, 8300, 0);//hay que medir a ver si es al reves ->255 a 0,ver video
+        if (Valor < 0)//para evitar valores negativos
+        {
+            Valor = 0;
+        }
+
+
+     if (Estado == true)
+     {
+            delayMicroseconds(Valor);
+            digitalWrite(Triac, HIGH);
+            delayMicroseconds(10);
+            digitalWrite(Triac, LOW);
+            Estado = false;
+     }
+
+
+        Serial.print(Referencia);
+        Serial.print(",");
+        Serial.print(Temperature);
+        Serial.print(",");
+        Serial.print(Control);
+        Serial.print(",");
+        Serial.print(Salida);
+        Serial.print(",");
+        Serial.print(Convert);
+        Serial.print(",");
+        Serial.println(Valor);
+
+    delay(50);
+}
